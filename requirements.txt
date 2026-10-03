@@ -1,4 +1,4 @@
-gradio
+streamlit
 PyMuPDF
 groq
 langchain
@@ -9,6 +9,7 @@ sentence-transformers
 reportlab
 python-dotenv
 pytest
+
 
 
 
