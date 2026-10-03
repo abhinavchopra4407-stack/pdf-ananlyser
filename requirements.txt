@@ -1,3 +1,4 @@
+streamlit
 gradio
 PyMuPDF
 groq
@@ -9,4 +10,5 @@ sentence-transformers
 reportlab
 python-dotenv
 pytest
+
 
