@@ -11,7 +11,7 @@ from services.summarizer import SummarizerService
 from services.rag_pipeline import RAGPipeline
 from services.export_service import ExportService
 
-# Page configuration for Streamlit
+# Page configuration
 st.set_page_config(
     page_title="PDF Query Assistant",
     page_icon="📚",
@@ -40,6 +40,9 @@ def init_session_state():
     if "chat_messages" not in st.session_state:
         st.session_state["chat_messages"] = []
 
+    if "quiz_data" not in st.session_state:
+        st.session_state["quiz_data"] = ""
+
 
 def main():
     init_session_state()
@@ -48,21 +51,30 @@ def main():
         <style>
         .main-header {
             text-align: center;
-            padding: 1.2rem;
+            padding: 1.4rem;
             background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
             color: white;
-            border-radius: 10px;
+            border-radius: 12px;
             margin-bottom: 1.5rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
         }
         .main-title {
             color: #60A5FA;
-            font-size: 2.2rem;
+            font-size: 2.3rem;
             font-weight: 700;
+        }
+        .badge {
+            background-color: #DBEAFE;
+            color: #1E40AF;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
         }
         </style>
         <div class="main-header">
             <div class="main-title">📚 PDF Query Assistant</div>
-            <p style="color: #94A3B8; margin-top: 5px;">Page-wise Summarization & RAG System for Textbooks & Lengthy PDFs</p>
+            <p style="color: #94A3B8; margin-top: 5px;">Advanced Page-wise Summarization, RAG System & Exam Practice for Textbooks</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -71,18 +83,20 @@ def main():
         st.header("📄 Document Upload")
         uploaded_file = st.file_uploader("Upload PDF Textbook", type=["pdf"])
 
-        with st.expander("⚙️ Groq API & Settings", expanded=False):
+        with st.expander("⚙️ LLM & RAG Advanced Settings", expanded=False):
             api_key = st.text_input("Groq API Key", value=config.GROQ_API_KEY, type="password")
             model_name = st.selectbox("LLM Model", ["llama-3.1-8b-instant", "llama3-8b-8192", "mixtral-8x7b-32768"], index=0)
-            if st.button("Save API Settings"):
+            top_k = st.slider("RAG Context Chunks (Top-K)", min_value=1, max_value=10, value=config.TOP_K_RESULTS)
+            
+            if st.button("Save Settings"):
                 st.session_state["summarizer"].update_credentials(api_key, model_name)
                 st.session_state["rag_pipeline"].update_credentials(api_key, model_name)
-                st.success("API Settings saved!")
+                st.success("Advanced settings saved!")
 
         if uploaded_file is not None:
             curr_pdf = st.session_state.get("pdf_data")
             if curr_pdf is None or curr_pdf.get("filename") != uploaded_file.name:
-                with st.spinner("Processing PDF textbook & indexing vectors..."):
+                with st.spinner("Processing PDF textbook & indexing vector database..."):
                     with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                         tmp.write(uploaded_file.getvalue())
                         tmp_path = tmp.name
@@ -95,6 +109,7 @@ def main():
                         st.session_state["pdf_data"] = metadata
                         st.session_state["pages_data"] = processor.pages_data
                         st.session_state["current_page"] = 1
+                        st.session_state["quiz_data"] = ""
 
                         # Build RAG vector index
                         st.session_state["rag_pipeline"].build_vector_index(processor.pages_data, uploaded_file.name)
@@ -108,11 +123,11 @@ def main():
                             st.session_state["summarizer"].generate_page_summary(p["page_number"], p["text"])
                         progress_bar.empty()
 
-                        st.sidebar.success("PDF processed successfully!")
+                        st.sidebar.success("PDF processed & vector index ready!")
                     except Exception as e:
                         st.error(f"Error processing PDF: {e}")
 
-        # Metadata Info Card
+        # Metadata Card
         pdf_meta = st.session_state.get("pdf_data")
         if pdf_meta:
             st.info(f"**Filename**: {pdf_meta['filename']}\n\n"
@@ -120,13 +135,26 @@ def main():
                     f"**File Size**: {pdf_meta['file_size_formatted']}")
             if pdf_meta.get("is_scanned"):
                 st.warning("⚠️ Scanned PDF detected. OCR may be required.")
+            
+            # Chapter Bookmarks Navigator if TOC present
+            chapters = pdf_meta.get("chapters", [])
+            if chapters:
+                st.markdown("### 🔖 Table of Contents")
+                ch_titles = [f"P.{c['page_number']}: {c['title']}" for c in chapters]
+                selected_ch = st.selectbox("Jump to Chapter", ch_titles)
+                if selected_ch:
+                    p_target = int(selected_ch.split(":")[0].replace("P.", "").strip())
+                    if p_target != st.session_state.get("current_page"):
+                        st.session_state["current_page"] = p_target
+                        st.rerun()
         else:
             st.info("Upload a PDF document to begin.")
 
     # ================= MAIN TABS =================
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📖 Page Summaries",
         "💬 Chat with PDF (RAG)",
+        "🎯 Exam Quiz & Practice",
         "📚 Chapter & Revision Sheet",
         "📥 Export & Download"
     ])
@@ -151,7 +179,7 @@ def main():
 
             with col_select:
                 selected_page_str = st.selectbox(
-                    "Jump to Page",
+                    "Select Page",
                     options=[f"Page {i}" for i in range(1, total_pages + 1)],
                     index=max(0, min(curr_p - 1, total_pages - 1))
                 )
@@ -170,7 +198,6 @@ def main():
             
             st.subheader(f"PDF Page {curr_p} of {total_pages} — Summary")
             
-            # Generate / retrieve summary
             summary = st.session_state["summarizer"].generate_page_summary(curr_p, p_data["text"])
             st.markdown(summary)
 
@@ -191,9 +218,9 @@ def main():
 
     # ---------------- TAB 2: RAG CHAT ----------------
     with tab2:
-        st.subheader("💬 Ask Questions About the PDF")
+        st.subheader("💬 Ask Questions About the PDF (RAG Pipeline)")
         
-        # Example question buttons
+        # Example questions
         col_q1, col_q2, col_q3, col_q4 = st.columns(4)
         q_clicked = None
         if col_q1.button("Explain in simple words"):
@@ -205,7 +232,6 @@ def main():
         if col_q4.button("Exam questions"):
             q_clicked = "Give me important exam questions from this document"
 
-        # Display Chat History
         chat_msgs = st.session_state.get("chat_messages", [])
         for msg in chat_msgs:
             with st.chat_message(msg["role"]):
@@ -219,15 +245,41 @@ def main():
                 st.write(prompt)
 
             with st.chat_message("assistant"):
-                with st.spinner("Thinking & searching document context..."):
+                with st.spinner("Searching vector index & synthesizing response..."):
                     res = st.session_state["rag_pipeline"].answer_question(prompt)
                     ans = res["answer"]
                     st.write(ans)
+
+                    # Show cited pages badge
+                    if res.get("citations"):
+                        c_str = ", ".join(f"Page {p}" for p in res["citations"])
+                        st.caption(f"📍 **Cited PDF Sources**: {c_str}")
+
                     st.session_state["chat_messages"].append({"role": "assistant", "content": ans})
 
-    # ---------------- TAB 3: CHAPTER & DOC SUMMARY ----------------
+    # ---------------- TAB 3: EXAM QUIZ & PRACTICE ----------------
     with tab3:
-        st.subheader("📚 Section & Revision Sheet Summaries")
+        st.subheader("🎯 Interactive Exam Quiz Generator")
+        st.write("Generate practice multiple choice questions (MCQs) directly from the PDF page summaries to test your understanding.")
+
+        if st.button("🚀 Generate 5 Practice MCQs from Textbook"):
+            if pages:
+                with st.spinner("Generating exam practice questions..."):
+                    pdf_info = st.session_state.get("pdf_data", {})
+                    quiz_md = st.session_state["summarizer"].generate_quiz(
+                        pdf_info.get("filename", "document.pdf"),
+                        pages
+                    )
+                    st.session_state["quiz_data"] = quiz_md
+            else:
+                st.warning("Please upload a PDF first.")
+
+        if st.session_state.get("quiz_data"):
+            st.markdown(st.session_state["quiz_data"])
+
+    # ---------------- TAB 4: CHAPTER & DOC SUMMARY ----------------
+    with tab4:
+        st.subheader("📚 Section & Master Revision Sheet")
         
         col_s1, col_s2 = st.columns(2)
         start_p = col_s1.number_input("Start Page", min_value=1, value=1)
@@ -254,8 +306,8 @@ def main():
             else:
                 st.warning("Please upload a PDF first.")
 
-    # ---------------- TAB 4: EXPORT & DOWNLOAD ----------------
-    with tab4:
+    # ---------------- TAB 5: EXPORT & DOWNLOAD ----------------
+    with tab5:
         st.subheader("📥 Export & Download Summaries")
         summarizer_inst = st.session_state.get("summarizer")
         if not pages or not summarizer_inst or not summarizer_inst.summary_cache:

@@ -72,8 +72,29 @@ Summaries:
 """
 
 
+QUIZ_GEN_PROMPT = """You are an expert textbook instructor creating an exam revision quiz.
+Based on the provided page summaries from the PDF textbook "{filename}", generate 5 multiple-choice questions (MCQs) for self-testing.
+
+Format each question cleanly as:
+
+### Question 1: [Question text]
+- A) [Option A]
+- B) [Option B]
+- C) [Option C]
+- D) [Option D]
+
+**Correct Answer**: [Correct Option Letter & Explanation]
+
+---
+
+Summaries:
+{combined_summaries}
+"""
+
+
 class SummarizerService:
     """Service to handle page-wise, range-wise, and document-level AI summarization."""
+
 
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or config.GROQ_API_KEY
@@ -208,18 +229,41 @@ class SummarizerService:
 
         prompt = DOCUMENT_SUMMARY_PROMPT.format(filename=filename, all_summaries=combined)
 
+    def generate_quiz(self, filename: str, pages_data: List[Dict[str, Any]]) -> str:
+        """Generates 5 multiple choice exam revision questions from page summaries."""
+        summaries_list = []
+        for p in pages_data[:30]:
+            p_num = p["page_number"]
+            summary = self.summary_cache.get(p_num, p["text"][:250])
+            summaries_list.append(f"Page {p_num}: {summary[:200]}")
+
+        combined = "\n".join(summaries_list)[:6000]
+
+        if not self.api_key or not self.client:
+            return (
+                f"### Practice Exam Quiz for {filename}\n\n"
+                "1. **What is the primary concept introduced in Chapter 1?**\n"
+                "   - A) Data Preprocessing\n"
+                "   - B) Supervised Model Training\n"
+                "   - C) Unsupervised Clustering\n"
+                "   - D) Dimensionality Reduction\n\n"
+                "   **Correct Answer**: B) Supervised Model Training\n\n"
+                "*(Note: Configure GROQ_API_KEY to auto-generate customized quizzes for any PDF page range.)*"
+            )
+
+        prompt = QUIZ_GEN_PROMPT.format(filename=filename, combined_summaries=combined)
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=2000
+                temperature=0.4,
+                max_tokens=1500
             )
-            doc_sum = response.choices[0].message.content.strip()
-            self.doc_summary_cache = doc_sum
-            return doc_sum
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            return f"⚠️ Failed to generate document summary: {str(e)}"
+            return f"⚠️ Failed to generate quiz: {str(e)}"
+
 
     def _generate_fallback_summary(self, page_num: int, text: str) -> str:
         """Heuristic simple summary fallback when API key is missing or offline."""
