@@ -19,14 +19,16 @@ def main():
     sys.stdout.flush()
 
     demo = build_app()
+    share_url = os.getenv("GRADIO_SHARE", "true").lower() == "true"
     demo.launch(
         server_name=config.HOST,
         server_port=config.PORT,
         theme=gr.themes.Soft(),
         css=CUSTOM_CSS,
-        share=False,
+        share=share_url,
         show_error=True
     )
+
 
 
 
